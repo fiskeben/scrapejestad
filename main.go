@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,7 +11,7 @@ import (
 	"golang.org/x/net/html"
 )
 
-type Row struct {
+type Reading struct {
 	ID       string
 	Time     time.Time
 	Temp     float32
@@ -27,9 +26,33 @@ type Row struct {
 	Gateways []Gateway
 }
 
+func (r Reading) String() string {
+	s := fmt.Sprintf(`ID=%s
+Time=%s
+Temp=%f
+Humidity=%f
+Light=%f
+PM25=%f
+PM10=%f
+Voltage=%f
+Firmware=%s
+Position=%s
+Fcnt=%d`, r.ID, r.Time.Format(time.RFC3339), r.Temp, r.Humidity, r.Light, r.PM25, r.PM10, r.Voltage, r.Firmware, r.Position.String(), r.Fcnt)
+	gateways := make([]string, len(r.Gateways))
+	for i, g := range r.Gateways {
+		gateways[i] = fmt.Sprintf("  %d %s\n", i, g.String())
+	}
+	s = fmt.Sprintf("%s\nGateways:\n%s", s, strings.Join(gateways, " "))
+	return s
+}
+
 type Position struct {
 	Lat float32
 	Lng float32
+}
+
+func (p Position) String() string {
+	return fmt.Sprintf("%f:%f", p.Lat, p.Lng)
 }
 
 type Gateway struct {
@@ -41,10 +64,18 @@ type Gateway struct {
 	RadioSettings RadioSettings
 }
 
+func (g Gateway) String() string {
+	return fmt.Sprintf("Name=%s Position=%s Distance=%f RSSI=%f LSNR=%f Radiosettings=%s", g.Name, g.Position.String(), g.Distance, g.RSSI, g.LSNR, g.RadioSettings.String())
+}
+
 type RadioSettings struct {
 	Frequency float32
 	Sf        string
 	Cr        string
+}
+
+func (r RadioSettings) String() string {
+	return fmt.Sprintf("Frequency=%f Sf=%s Cr=%s", r.Frequency, r.Sf, r.Cr)
 }
 
 func main() {
@@ -52,9 +83,14 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	_, err = parse(r)
+	res, err := parse(r)
 	if err != nil {
 		panic(err)
+	}
+
+	for _, r := range res {
+		fmt.Println(r)
+		fmt.Println()
 	}
 }
 
@@ -62,7 +98,7 @@ func read() (io.Reader, error) {
 	return os.Open("example.html")
 }
 
-func parse(r io.Reader) ([]Row, error) {
+func parse(r io.Reader) ([]Reading, error) {
 	doc, err := html.Parse(r)
 	if err != nil {
 		return nil, err
@@ -71,23 +107,30 @@ func parse(r io.Reader) ([]Row, error) {
 	return parseSubtree(doc)
 }
 
-func parseSubtree(n *html.Node) ([]Row, error) {
-	fmt.Printf("checking %s\n", n.Data)
-	c := n.FirstChild
-	fmt.Printf("child %s\n", c.Data)
+func parseSubtree(n *html.Node) ([]Reading, error) {
 	if n.Type == html.ElementNode && n.Data == "table" {
-		return parseTable(n)
+		return parseTable(n.FirstChild.NextSibling)
 	}
+
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		return parseSubtree(c)
+		res, err := parseSubtree(c)
+		if err != nil {
+			return nil, err
+		}
+		if res != nil {
+			return res, nil
+		}
 	}
-	return nil, errors.New("this should not happen")
+	return nil, nil
 }
 
-func parseTable(t *html.Node) ([]Row, error) {
-	rows := make([]Row, 0, 10)
+func parseTable(t *html.Node) ([]Reading, error) {
+	rows := make([]Reading, 0, 10)
 	for c := t.FirstChild; c != nil; c = c.NextSibling {
-		nodes := prepareRow(c)
+		if c.Type != html.ElementNode || c.Data != "tr" {
+			continue
+		}
+		nodes := mapRow(c)
 		switch len(nodes) {
 		case 0:
 			continue
@@ -97,9 +140,9 @@ func parseTable(t *html.Node) ([]Row, error) {
 				fmt.Printf("err: %v\n", err)
 				continue
 			}
-			fmt.Println("hellu")
 			row := rows[len(rows)-1]
 			row.Gateways = append(row.Gateways, g)
+			rows[len(rows)-1] = row
 		case 16:
 			row, err := parseRow(nodes)
 			if err != nil {
@@ -107,7 +150,6 @@ func parseTable(t *html.Node) ([]Row, error) {
 				continue
 			}
 			rows = append(rows, *row)
-			fmt.Printf("row %v\n", row)
 		default:
 			fmt.Printf("node %v has unexpected number of nodes: %d\n", c, len(nodes))
 		}
@@ -115,8 +157,8 @@ func parseTable(t *html.Node) ([]Row, error) {
 	return rows, nil
 }
 
-func parseRow(n []*html.Node) (*Row, error) {
-	var r Row
+func parseRow(n []*html.Node) (*Reading, error) {
+	var r Reading
 
 	r.ID = getID(n[0])
 
@@ -184,16 +226,20 @@ func parseGateway(n []*html.Node) (Gateway, error) {
 	// TODO parse URL to get position
 	var g Gateway
 
-	fmt.Printf("%s %s\n", n[0].Data, n[0].FirstChild.FirstChild.Data)
-	g.Name = strings.TrimSpace(n[0].FirstChild.FirstChild.Data)
+	parent := n[0].FirstChild
+	if parent.FirstChild != nil {
+		g.Name = strings.TrimSpace(parent.FirstChild.Data)
+	}
 
 	data := strings.TrimSpace(n[1].FirstChild.Data)
-	v := data[:len(data)-2]
-	dist, err := strconv.ParseFloat(v, 32)
-	if err != nil {
-		return g, err
+	if len(data) > 2 {
+		v := data[:len(data)-2]
+		dist, err := strconv.ParseFloat(v, 32)
+		if err != nil {
+			return g, err
+		}
+		g.Distance = float32(dist)
 	}
-	g.Distance = float32(dist)
 
 	rssi, err := strconv.ParseFloat(strings.TrimSpace(n[2].FirstChild.Data), 32)
 	if err != nil {
@@ -222,7 +268,7 @@ func parseGateway(n []*html.Node) (Gateway, error) {
 	return g, nil
 }
 
-func prepareRow(n *html.Node) []*html.Node {
+func mapRow(n *html.Node) []*html.Node {
 	if n.FirstChild.Data == "th" {
 		return make([]*html.Node, 0)
 	}
