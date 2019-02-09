@@ -1,101 +1,26 @@
-package main
+package scrapejestad
 
 import (
 	"fmt"
 	"io"
-	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"net/http"
+	"net/url"
+
 	"golang.org/x/net/html"
 )
 
-type Reading struct {
-	ID       string
-	Time     time.Time
-	Temp     float32
-	Humidity float32
-	Light    float32
-	PM25     float32
-	PM10     float32
-	Voltage  float32
-	Firmware string
-	Position Position
-	Fcnt     int
-	Gateways []Gateway
-}
-
-func (r Reading) String() string {
-	s := fmt.Sprintf(`ID=%s
-Time=%s
-Temp=%f
-Humidity=%f
-Light=%f
-PM25=%f
-PM10=%f
-Voltage=%f
-Firmware=%s
-Position=%s
-Fcnt=%d`, r.ID, r.Time.Format(time.RFC3339), r.Temp, r.Humidity, r.Light, r.PM25, r.PM10, r.Voltage, r.Firmware, r.Position.String(), r.Fcnt)
-	gateways := make([]string, len(r.Gateways))
-	for i, g := range r.Gateways {
-		gateways[i] = fmt.Sprintf("  %d %s\n", i, g.String())
-	}
-	s = fmt.Sprintf("%s\nGateways:\n%s", s, strings.Join(gateways, " "))
-	return s
-}
-
-type Position struct {
-	Lat float32
-	Lng float32
-}
-
-func (p Position) String() string {
-	return fmt.Sprintf("%f:%f", p.Lat, p.Lng)
-}
-
-type Gateway struct {
-	Name          string
-	Position      Position
-	Distance      float32
-	RSSI          float32
-	LSNR          float32
-	RadioSettings RadioSettings
-}
-
-func (g Gateway) String() string {
-	return fmt.Sprintf("Name=%s Position=%s Distance=%f RSSI=%f LSNR=%f Radiosettings=%s", g.Name, g.Position.String(), g.Distance, g.RSSI, g.LSNR, g.RadioSettings.String())
-}
-
-type RadioSettings struct {
-	Frequency float32
-	Sf        string
-	Cr        string
-}
-
-func (r RadioSettings) String() string {
-	return fmt.Sprintf("Frequency=%f Sf=%s Cr=%s", r.Frequency, r.Sf, r.Cr)
-}
-
-func main() {
-	r, err := read()
+// Read downloads a document and parses it.
+func Read(u url.URL) ([]Reading, error) {
+	res, err := http.Get(u.String())
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("error reading '%s': %v", u.String(), err)
 	}
-	res, err := parse(r)
-	if err != nil {
-		panic(err)
-	}
-
-	for _, r := range res {
-		fmt.Println(r)
-		fmt.Println()
-	}
-}
-
-func read() (io.Reader, error) {
-	return os.Open("example.html")
+	defer res.Body.Close()
+	return parse(res.Body)
 }
 
 func parse(r io.Reader) ([]Reading, error) {
@@ -137,7 +62,7 @@ func parseTable(t *html.Node) ([]Reading, error) {
 		case 5:
 			g, err := parseGateway(nodes)
 			if err != nil {
-				fmt.Printf("err: %v\n", err)
+				fmt.Printf("error parsing gateway: %v\n", err)
 				continue
 			}
 			row := rows[len(rows)-1]
@@ -146,12 +71,12 @@ func parseTable(t *html.Node) ([]Reading, error) {
 		case 16:
 			row, err := parseRow(nodes)
 			if err != nil {
-				fmt.Printf("err: %v\n", err)
+				fmt.Printf("error parsing row: %v\n", err)
 				continue
 			}
 			rows = append(rows, *row)
 		default:
-			fmt.Printf("node %v has unexpected number of nodes: %d\n", c, len(nodes))
+			fmt.Printf("node %v has unexpected number of nodes: %d\n", c.Data, len(nodes))
 		}
 	}
 	return rows, nil
