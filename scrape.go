@@ -14,7 +14,7 @@ import (
 )
 
 // Read downloads a document and parses it.
-func Read(u url.URL) ([]Reading, error) {
+func Read(u *url.URL) ([]Reading, error) {
 	res, err := http.Get(u.String())
 	if err != nil {
 		return nil, fmt.Errorf("error reading '%s': %v", u.String(), err)
@@ -85,7 +85,7 @@ func parseTable(t *html.Node) ([]Reading, error) {
 func parseRow(n []*html.Node) (*Reading, error) {
 	var r Reading
 
-	r.ID = getID(n[0])
+	r.SensorID = getID(n[0])
 
 	data := strings.TrimSpace(n[1].FirstChild.Data)
 	t, err := time.Parse("2006-01-02 15:04:05", data)
