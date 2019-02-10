@@ -160,11 +160,12 @@ func parseRow(n []*html.Node) (*Reading, error) {
 }
 
 func parseGateway(n []*html.Node) (Gateway, error) {
-	// TODO parse URL to get position
 	var g Gateway
 
 	parent := n[0].FirstChild
 	if parent.FirstChild != nil {
+		pos, _ := extractPosition(parent)
+		g.Position = pos
 		g.Name = strings.TrimSpace(parent.FirstChild.Data)
 	}
 
@@ -233,4 +234,53 @@ func getID(n *html.Node) string {
 		return id
 	}
 	return ""
+}
+
+func extractPosition(n *html.Node) (Position, error) {
+	var uri string
+	var pos Position
+
+	for _, a := range n.Attr {
+		if a.Key == "href" {
+			uri = a.Val
+			break
+		}
+	}
+	if uri == "" {
+		return pos, nil
+	}
+
+	lat, err := extractPositionPart(uri, "mlat")
+	if err != nil {
+		return pos, err
+	}
+	pos.Lat = lat
+
+	lng, err := extractPositionPart(uri, "mlon")
+	if err != nil {
+		return pos, err
+	}
+	pos.Lng = lng
+
+	return pos, nil
+}
+
+func extractPositionPart(uri, name string) (float32, error) {
+	i := strings.Index(uri, name)
+	if i == -1 {
+		return 0, nil
+	}
+
+	s := uri[i+5:]
+	endAt := strings.Index(s, "&")
+	if endAt == -1 {
+		endAt = len(s)
+	}
+	s = s[:endAt]
+	val, err := strconv.ParseFloat(s, 32)
+	if err != nil {
+		return 0, fmt.Errorf("unable to parse latitude from '%s': %v", uri, err)
+	}
+
+	return float32(val), nil
 }
