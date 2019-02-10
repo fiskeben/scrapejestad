@@ -1,6 +1,7 @@
 package scrapejestad
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"strconv"
@@ -15,7 +16,18 @@ import (
 
 // Read downloads a document and parses it.
 func Read(u *url.URL) ([]Reading, error) {
-	res, err := http.Get(u.String())
+	return ReadWithContext(context.Background(), u)
+}
+
+// ReadWithContext downloads a document and parses it.
+func ReadWithContext(ctx context.Context, u *url.URL) ([]Reading, error) {
+	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	client := http.Client{Timeout: time.Second * 2}
+	res, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("error reading '%s': %v", u.String(), err)
 	}
