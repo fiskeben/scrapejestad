@@ -78,3 +78,18 @@ func Test_extractPositionPart(t *testing.T) {
 		t.Errorf("expected longitude to be 5.340381, got %f", lng)
 	}
 }
+
+func Test_handleMissingData(t *testing.T) {
+	f, err := os.Open("testdata/missing_data.html")
+	if err != nil {
+		t.Fatalf("failed to open testdata: %v", err)
+	}
+	res, err := parse(f)
+	if err != nil {
+		t.Fatalf("error parsing data: %v", err)
+	}
+	if len(res) != 3 {
+		t.Errorf("expected 3 readings, got %d", len(res))
+	}
+
+}
